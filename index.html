@@ -1424,11 +1424,13 @@ function viewLn(){
   const UNIT = list.length && list.every(e => e.isRelay) ? "チーム" : "名";
   if(!list.length) return head + rcHead(r) + `<div class="empty"><span class="e">🫧</span>このレースの申込がありません</div>`;
 
-  const confirmed = META.laneConfirmed && list.every(e => e.heat && e.lane != null);
+  // 確定値方式では、スタートリストに載った人だけで組を組む（申込一覧にいて当日のリストに無い人は並べない）
+  const confirmed = META.laneConfirmed && list.some(e => e.heat && e.lane != null);
   let heats;
   if(confirmed){
     const m = new Map();
     for(const e of list){
+      if(!(e.heat && e.lane != null)) continue;
       if(!m.has(e.heat)) m.set(e.heat, {n:0, seat:new Map()});
       m.get(e.heat).seat.set(e.lane, e); m.get(e.heat).n++;
     }
