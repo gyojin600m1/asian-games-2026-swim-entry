@@ -1,0 +1,6 @@
+watch/state.json
+watch/log.txt
+watch/.lock
+watch/.halted
+watch/*.log
+watch/__pycache__/
