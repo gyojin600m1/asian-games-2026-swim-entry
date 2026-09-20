@@ -254,7 +254,7 @@ def merge(base, state):
         done_prog[no].append(done)
         heatnum = un or int(u.get('unitnum') or 0)          # Info.UnitNum は当てにならない（全部 "1" が返る）。Keyの 000300 → 第3組
         for r in u['rows']:
-            if '4X' in evkey or str(r['reg']).startswith('SWM'):
+            if '4X' in evkey:
                 # ---- リレー ----
                 team = team_of(r); org_team[r['org']] = team
                 row = find_relay(team, no)
