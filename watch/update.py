@@ -32,7 +32,7 @@ DAYLBL = {d: f'{i+1}日目' for i, d in enumerate(DAYS)}
 WINDOW = ('09:30', '19:59')                                     # 予選10:00〜／決勝17:00〜19:00ごろ
 STOP_AFTER = '2026-09-25 20:30'
 RECHECK = 15 * 60                                               # 終わった組は15分に1回だけ見直す（訂正対応）
-FINAL_N = 8
+FINAL_N = {'A': 10, 'T': 8}                                    # 決勝は個人10名（0〜9レーン）・リレー8チーム（9/20の決勝スタートリストで確認）
 
 SHORT = {'中華人民共和国': '中国', 'ホンコン・チャイナ': '香港', '大韓民国': '韓国', 'イラン・イスラム共和国': 'イラン',
          'ラオス人民民主共和国': 'ラオス', '東ティモール民主共和国': '東ティモール', 'マカオ・チャイナ': 'マカオ'}
@@ -55,6 +55,13 @@ def notify(title, msg):
 
 def stop_myself():
     subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], check=False)
+
+
+def log_once(state, m):
+    """同じ知らせを毎回書かない（state.logged に覚える）"""
+    seen = state.setdefault('logged', [])
+    if m not in seen:
+        seen.append(m); log(m)
 
 
 def load(p, d):
@@ -120,6 +127,7 @@ def compact(unit):
         if mem:
             row['members'] = mem
         rows.append(row)
+    rows.sort(key=lambda r: (str(r.get('lane') or ''), str(r.get('reg') or '')))   # RUNNING中は並びが変わるので、並びの違いを変更扱いにしない
     return {'status': info.get('Status') or '', 'type': info.get('Type') or 'A', 'unitnum': info.get('UnitNum'),
             'rows': rows, 'at': time.strftime('%H:%M')}
 
@@ -283,10 +291,10 @@ def merge(base, state):
                     if sw is None:
                         sw = {'id': r['reg'], 'name': r['name'], 'team': team_of(r), 'gender': g if g != '混合' else '男子'}
                         data['swimmers'].append(sw)
-                        log(f'  名簿に無い選手を追加 {r["name"]}（{sw["team"]}）')
+                        log_once(state, f'  名簿に無い選手を追加 {r["name"]}（{sw["team"]}）')
                     row = dict(sw); row.update({'distance': dist, 'stroke': stroke, 'programNos': [no]})
                     entries.append(row)
-                    log(f'  申込一覧に無い出場者を追加 {r["name"]} No.{no}')
+                    log_once(state, f'  申込一覧に無い出場者を追加 {r["name"]} No.{no}')
                 if row is None:
                     log(f'  行が見つからない {r["name"]} {key}')
                     continue
@@ -337,8 +345,15 @@ def merge(base, state):
             x['result']['rank'] = rank
         finished_nos.add(no)
         if p['round'] == '予選':
+            relay = '×' in (p.get('distance') or '')
+            # 決勝のスタートリストが出ていれば、それに載っている人を「決勝へ」。まだなら記録順の上位（個人10・リレー8）
+            fno = prog_index.get((p['gender'], p['distance'], p['stroke'], '決勝'))
+            fin_keys = {(x.get('id') or x.get('team')) for x in entries + relays if fno in (x.get('programNos') or []) and (x.get('lane') is not None)}
             qs = [x for x in ok if str(x.get('_q', '')).upper().startswith('Q')]
-            adv = qs if qs else ok[:FINAL_N]
+            if fin_keys:
+                adv = [x for x in ok if (x.get('id') or x.get('team')) in fin_keys]
+            else:
+                adv = qs if qs else ok[:FINAL_N['T' if relay else 'A']]
             for x in adv:
                 x['result']['adv'] = True
     # タイム決勝①②は両方が終わってから、①②合わせて順位を付ける
@@ -375,9 +390,8 @@ def merge(base, state):
               'relayEntries': len(rel_uniq), 'swimmers': len(data['swimmers']), 'programItems': len(prog), 'schoolsAndTeams': len(teams)}
     old_counts = (data.get('summary') or {}).get('counts') or {}
     diff = {k: (old_counts.get(k), v) for k, v in counts.items() if old_counts.get(k) != v}
-    if diff and diff != merge.last_diff:
-        log('  検算値が動いた: ' + json.dumps(diff, ensure_ascii=False))
-        merge.last_diff = diff
+    if diff:
+        log_once(state, '  検算値が動いた: ' + json.dumps(diff, ensure_ascii=False))
     data.setdefault('summary', {})['counts'] = counts
 
     # 4) 画面の設定
@@ -407,6 +421,13 @@ merge.last_diff = None
 
 
 def publish(data, n_res, n_fin):
+    # 画面に出る中身が前回の公開と同じなら（組の状態が変わっただけ等）何もしない
+    payload = json.dumps(data, ensure_ascii=False, sort_keys=True)
+    try:
+        if open(SRC, encoding='utf-8').read() and json.dumps(json.load(open(SRC, encoding='utf-8')), ensure_ascii=False, sort_keys=True) == payload:
+            return True
+    except Exception:
+        pass
     json.dump(data, open(SRC, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     b = subprocess.run(['python3', BUILD, SRC], capture_output=True, text=True)
     if b.returncode != 0 or not os.path.exists(OUT):
@@ -448,13 +469,18 @@ def main():
     base = load(BASE, None)
     if not base:
         log('base.json が無い'); return
-    state = load(STATE, {})
-    changed = fetch(state, byhand)
-    json.dump(state, open(STATE, 'w', encoding='utf-8'), ensure_ascii=False)
-    if not changed and not byhand:
-        return
-    data, n_res, n_fin = merge(base, state)
-    publish(data, n_res, n_fin)
+    # 競技中（予選10:00〜12:30／決勝17:00〜19:30）は1回の起動で20秒おきに3回見る＝実質20秒間隔
+    in_session = (not byhand) and (('09:55' <= hm <= '12:30') or ('16:55' <= hm <= '19:30'))
+    for i in range(3 if in_session else 1):
+        if i:
+            time.sleep(20)
+        state = load(STATE, {})
+        changed = fetch(state, byhand)
+        json.dump(state, open(STATE, 'w', encoding='utf-8'), ensure_ascii=False)
+        if changed or byhand:
+            data, n_res, n_fin = merge(base, state)
+            json.dump(state, open(STATE, 'w', encoding='utf-8'), ensure_ascii=False)
+            publish(data, n_res, n_fin)
 
 
 if __name__ == '__main__':
