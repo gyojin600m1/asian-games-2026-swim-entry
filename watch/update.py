@@ -260,12 +260,18 @@ def merge(base, state):
                 row = find_relay(team, no)
                 if row is None:
                     src = find_relay(team, heat_no)
-                    if src is None:
-                        log(f'  リレーが名簿に無い {team} {evkey}')
+                    if src is None and not is_final:
+                        # 申込一覧に無かったチーム（追加エントリー）
+                        row = {'team': team, 'gender': g, 'distance': dist, 'stroke': stroke, 'programNos': [no]}
+                        relays.append(row)
+                        log_once(state, f'  申込一覧に無いリレーを追加 {team} {evkey}')
+                    elif src is None:
+                        log_once(state, f'  リレーが名簿に無い {team} {evkey}')
                         continue
-                    row = {k: v for k, v in src.items() if k not in ('heat', 'lane', 'result', 'note')}
-                    row['programNos'] = [no]
-                    relays.append(row)
+                    else:
+                        row = {k: v for k, v in src.items() if k not in ('heat', 'lane', 'result', 'note')}
+                        row['programNos'] = [no]
+                        relays.append(row)
                 if r.get('members'):
                     row['members'] = [sw_name.get(m['reg'], m['name']) for m in r['members']]
             else:
@@ -278,7 +284,7 @@ def merge(base, state):
                 if row is None and is_final:
                     src = find_entry(r['reg'], heat_no)
                     if src is None:
-                        log(f'  選手が名簿に無い {r["name"]} {evkey}')
+                        log_once(state, f'  選手が名簿に無い {r["name"]} {evkey}')
                         continue
                     row = {k: v for k, v in src.items() if k not in ('heat', 'lane', 'result', 'note', 'time', 'sortTime')}
                     row['programNos'] = [no]
@@ -296,7 +302,7 @@ def merge(base, state):
                     entries.append(row)
                     log_once(state, f'  申込一覧に無い出場者を追加 {r["name"]} No.{no}')
                 if row is None:
-                    log(f'  行が見つからない {r["name"]} {key}')
+                    log_once(state, f'  行が見つからない {r["name"]} {key}')
                     continue
             # 組・レーン・申込タイム
             lane = r.get('lane')
