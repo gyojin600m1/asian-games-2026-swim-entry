@@ -435,7 +435,7 @@ def publish(data, n_res, n_fin):
     except Exception:
         pass
     json.dump(data, open(SRC, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-    b = subprocess.run(['python3', BUILD, SRC], capture_output=True, text=True)
+    b = subprocess.run([sys.executable, BUILD, SRC], capture_output=True, text=True)
     if b.returncode != 0 or not os.path.exists(OUT):
         log('  ビルドが検算に落ちた: ' + (b.stdout + b.stderr)[-400:].replace('\n', ' / '))
         notify('アジア大会 競泳', 'ビルドが検算に落ちました（公開せず）')
@@ -448,13 +448,13 @@ def publish(data, n_res, n_fin):
         subprocess.run(['cp', OUT, BACKUP])
     except Exception:
         pass
-    subprocess.run(['git', 'add', 'index.html', 'live.json'], cwd=APP, capture_output=True)
+    subprocess.run(['/Applications/Xcode.app/Contents/Developer/usr/bin/git', 'add', 'index.html', 'live.json'], cwd=APP, capture_output=True)
     msg = f'速報を反映（{n_fin}/82プログラム・結果{n_res}件） {time.strftime("%H:%M")}'
-    cm = subprocess.run(['git', '-c', 'user.name=gyojin600m1', '-c', 'user.email=gyojin600m1@gmail.com',
+    cm = subprocess.run(['/Applications/Xcode.app/Contents/Developer/usr/bin/git', '-c', 'user.name=gyojin600m1', '-c', 'user.email=gyojin600m1@gmail.com',
                          'commit', '-q', '-m', msg], cwd=APP, capture_output=True, text=True)
     if cm.returncode != 0:
         return True                                    # 変更なし
-    ps = subprocess.run(['git', 'push', '-q'], cwd=APP, capture_output=True, text=True)
+    ps = subprocess.run(['/Applications/Xcode.app/Contents/Developer/usr/bin/git', 'push', '-q'], cwd=APP, capture_output=True, text=True)
     log(f'  {msg} → ' + ('公開した' if ps.returncode == 0 else 'pushに失敗（次回やり直す）: ' + ps.stderr[-120:]))
     return ps.returncode == 0
 
